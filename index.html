@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>デジタルサイネージ</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: none; /* 初期状態では非表示 */
+        }
+        /* ロード中に表示するスタイル */
+        #loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100vh;
+            background-color: #333;
+            color: white;
+            font-family: sans-serif;
+            font-size: 2em;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">読み込み中...</div>
+    <iframe id="frame1" src="" allowfullscreen></iframe>
+    <iframe id="frame2" src="" allowfullscreen></iframe>
+    
+    <script>
+        // ここにGoogleスプレッドシートの公開URLを貼り付けます
+        const spreadsheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSmeraVhwPi2B-sl4JADlTLaCogs9KyKEgSPfZiCHHiApPQBr6OxjNb-lcBuGWf3P173vxxALuKQyDu/pub?output=csv';
+
+        const changeInterval = 10000; // 10秒ごとにページを切り替え (ミリ秒単位)
+
+        let urls = [];
+        let currentIndex = 0;
+        const iframes = [document.getElementById('frame1'), document.getElementById('frame2')];
+        let currentIframeIndex = 0;
+        let isFirstLoad = true;
+
+        // GoogleスプレッドシートからURLリストを読み込む関数
+        async function fetchUrls() {
+            try {
+                const response = await fetch(spreadsheetUrl);
+                const text = await response.text();
+                // CSVデータを改行で分割し、空行を除去してURLの配列を作成
+                urls = text.split('\n').map(line => line.trim()).filter(line => line !== '');
+                
+                if (urls.length > 0) {
+                    console.log('URLリストを読み込みました:', urls);
+                    document.getElementById('loading').style.display = 'none'; // 読み込み完了後、非表示
+                    startSlideshow();
+                } else {
+                    console.error('URLリストが空です。スプレッドシートにURLを入力してください。');
+                }
+            } catch (error) {
+                console.error('URLの取得に失敗しました:', error);
+                document.getElementById('loading').textContent = '読み込みエラー: URLを取得できませんでした。';
+            }
+        }
+
+        // スライドショーを開始する関数
+        function startSlideshow() {
+            if (urls.length === 0) return;
+
+            // 最初のページを読み込む
+            loadNextPage();
+
+            // 定期的にページを切り替えるタイマーを設定
+            setInterval(() => {
+                loadNextPage();
+            }, changeInterval);
+        }
+
+        // 次のページを読み込む関数
+        function loadNextPage() {
+            const nextUrl = urls[currentIndex];
+            const currentIframe = iframes[currentIframeIndex];
+
+            // 読み込みが完了したら iframe を表示する
+            currentIframe.onload = () => {
+                currentIframe.style.display = 'block';
+                if (!isFirstLoad) {
+                    const prevIframe = iframes[1 - currentIframeIndex];
+                    prevIframe.style.display = 'none'; // 前の iframe を非表示にする
+                }
+                isFirstLoad = false;
+            };
+
+            console.log(`URLを読み込み中: ${nextUrl}`);
+            currentIframe.src = nextUrl;
+            
+            // インデックスを更新
+            currentIndex = (currentIndex + 1) % urls.length;
+            currentIframeIndex = 1 - currentIframeIndex;
+        }
+
+        // ページが読み込まれたらURLの取得を開始
+        document.addEventListener('DOMContentLoaded', fetchUrls);
+    </script>
+</body>
+</html>
