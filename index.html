@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>デジタルサイネージ</title>
+    <title>ハイブリッド・デジタルサイネージ</title>
     <style>
         body, html {
             margin: 0;
@@ -11,14 +11,55 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
+            font-family: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+            color: #333;
+            background-color: #f0f0f0;
+        }
+        #container {
+            width: 100%;
+            height: 100%;
+            position: relative;
         }
         iframe {
             width: 100%;
             height: 100%;
             border: none;
-            display: none; /* 初期状態では非表示 */
+            position: absolute;
+            top: 0;
+            left: 0;
+            transition: opacity 0.5s;
         }
-        /* ロード中に表示するスタイル */
+        .content-display {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-color: #f8f8f8;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            transition: opacity 0.5s;
+            opacity: 0;
+            z-index: 0;
+            text-align: left;
+        }
+        .content-display h2 {
+            font-size: 3.5em;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .content-display p {
+            font-size: 1.8em;
+            margin-bottom: 10px;
+        }
+        .content-display a {
+            color: #007bff;
+            text-decoration: none;
+        }
         #loading {
             display: flex;
             justify-content: center;
@@ -27,87 +68,127 @@
             height: 100vh;
             background-color: #333;
             color: white;
-            font-family: sans-serif;
             font-size: 2em;
         }
     </style>
 </head>
 <body>
-    <div id="loading">読み込み中...</div>
-    <iframe id="frame1" src="" allowfullscreen></iframe>
-    <iframe id="frame2" src="" allowfullscreen></iframe>
+    <div id="container">
+        <div id="loading">コンテンツを読み込み中...</div>
+        <iframe id="display-iframe"></iframe>
+        <div id="display-content" class="content-display"></div>
+    </div>
     
     <script>
-        // ここにGoogleスプレッドシートの公開URLを貼り付けます
-        const spreadsheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSmeraVhwPi2B-sl4JADlTLaCogs9KyKEgSPfZiCHHiApPQBr6OxjNb-lcBuGWf3P173vxxALuKQyDu/pub?output=csv';
-
+        // Googleスプレッドシートの公開URLをここに貼り付けます
+        const spreadsheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSmeraVhwPi2B-sl4JADlTLaCogs9KyKEgSPfZiCHHiApPQBr6OxjNb-lcBuGWf3P173vxxALuKQyDu/pubhtml';
+        
         const changeInterval = 10000; // 10秒ごとにページを切り替え (ミリ秒単位)
 
-        let urls = [];
+        let masterList = [];
         let currentIndex = 0;
-        const iframes = [document.getElementById('frame1'), document.getElementById('frame2')];
-        let currentIframeIndex = 0;
-        let isFirstLoad = true;
 
-        // GoogleスプレッドシートからURLリストを読み込む関数
-        async function fetchUrls() {
+        // Googleスプレッドシートからデータを読み込む関数
+        async function fetchData() {
             try {
                 const response = await fetch(spreadsheetUrl);
                 const text = await response.text();
-                // CSVデータを改行で分割し、空行を除去してURLの配列を作成
-                urls = text.split('\n').map(line => line.trim()).filter(line => line !== '');
+                const lines = text.split('\n').map(line => line.trim()).filter(line => line !== '');
                 
-                if (urls.length > 0) {
-                    console.log('URLリストを読み込みました:', urls);
-                    document.getElementById('loading').style.display = 'none'; // 読み込み完了後、非表示
+                const data = lines.map(line => {
+                    const parts = line.split(',');
+                    return {
+                        url: parts[0].trim(),
+                        type: parts[1] ? parts[1].trim().toLowerCase() : ''
+                    };
+                });
+
+                document.getElementById('loading').textContent = 'コンテンツを準備中...';
+
+                // 各行を処理してマスターリストを作成
+                for (const item of data) {
+                    if (item.type === 'rss') {
+                        const rssItems = await fetchAndParseRss(item.url);
+                        if (rssItems) {
+                            masterList.push(...rssItems);
+                        }
+                    } else {
+                        masterList.push({ type: 'web', url: item.url });
+                    }
+                }
+                
+                if (masterList.length > 0) {
+                    document.getElementById('loading').style.display = 'none';
                     startSlideshow();
                 } else {
-                    console.error('URLリストが空です。スプレッドシートにURLを入力してください。');
+                    document.getElementById('loading').textContent = '表示するコンテンツがありません。';
+                }
+
+            } catch (error) {
+                console.error('データの取得に失敗しました:', error);
+                document.getElementById('loading').textContent = '読み込みエラー: データが取得できませんでした。';
+            }
+        }
+
+        // RSSフィードを読み込んで解析する関数
+        async function fetchAndParseRss(rssUrl) {
+            try {
+                // CORSエラーを回避するため、プロキシサービスを利用
+                const proxyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                
+                if (data.status === 'ok' && data.items) {
+                    return data.items.map(item => ({
+                        type: 'rss',
+                        title: item.title,
+                        link: item.link
+                    }));
+                } else {
+                    console.error('RSSフィードの解析に失敗しました:', data.message);
+                    return null;
                 }
             } catch (error) {
-                console.error('URLの取得に失敗しました:', error);
-                document.getElementById('loading').textContent = '読み込みエラー: URLを取得できませんでした。';
+                console.error('RSSフィードの取得に失敗しました:', error);
+                return null;
             }
         }
 
         // スライドショーを開始する関数
         function startSlideshow() {
-            if (urls.length === 0) return;
-
-            // 最初のページを読み込む
-            loadNextPage();
-
-            // 定期的にページを切り替えるタイマーを設定
+            loadNextContent();
             setInterval(() => {
-                loadNextPage();
+                loadNextContent();
             }, changeInterval);
         }
 
-        // 次のページを読み込む関数
-        function loadNextPage() {
-            const nextUrl = urls[currentIndex];
-            const currentIframe = iframes[currentIframeIndex];
-
-            // 読み込みが完了したら iframe を表示する
-            currentIframe.onload = () => {
-                currentIframe.style.display = 'block';
-                if (!isFirstLoad) {
-                    const prevIframe = iframes[1 - currentIframeIndex];
-                    prevIframe.style.display = 'none'; // 前の iframe を非表示にする
-                }
-                isFirstLoad = false;
-            };
-
-            console.log(`URLを読み込み中: ${nextUrl}`);
-            currentIframe.src = nextUrl;
+        // 次のコンテンツを読み込む関数
+        function loadNextContent() {
+            const item = masterList[currentIndex];
+            const iframe = document.getElementById('display-iframe');
+            const contentDiv = document.getElementById('display-content');
             
+            if (item.type === 'rss') {
+                // RSSコンテンツを表示
+                iframe.style.opacity = '0';
+                contentDiv.style.opacity = '1';
+                contentDiv.innerHTML = `
+                    <h2>${item.title}</h2>
+                    <p><a href="${item.link}" target="_blank">${item.link}</a></p>
+                `;
+            } else {
+                // ウェブサイトを表示
+                contentDiv.style.opacity = '0';
+                iframe.style.opacity = '1';
+                iframe.src = item.url;
+            }
+
             // インデックスを更新
-            currentIndex = (currentIndex + 1) % urls.length;
-            currentIframeIndex = 1 - currentIframeIndex;
+            currentIndex = (currentIndex + 1) % masterList.length;
         }
 
-        // ページが読み込まれたらURLの取得を開始
-        document.addEventListener('DOMContentLoaded', fetchUrls);
+        // ページが読み込まれたらデータの取得を開始
+        document.addEventListener('DOMContentLoaded', fetchData);
     </script>
 </body>
 </html>
